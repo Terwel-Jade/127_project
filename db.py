@@ -12,6 +12,7 @@ class StudentOrgDBMS:
         self.create_database("student_org_db")
         self.use_database("student_org_db")
         self.create_tables()
+        # self.destroy_database("student_org_db")
 
     def destroy_database(self, name):
         self.cursor.execute(f"DROP DATABASE IF EXISTS {name}")
@@ -58,7 +59,8 @@ class StudentOrgDBMS:
                 `role` varchar(20), -- can put check
                 `semester` varchar(1) CHECK (semester IN ('1', '2', 'M')),
                 CONSTRAINT joins_student_num_fk FOREIGN KEY(student_num) REFERENCES member(student_num),
-                CONSTRAINT joins_org_id_fk FOREIGN KEY(org_id) REFERENCES organization(org_id)
+                CONSTRAINT joins_org_id_fk FOREIGN KEY(org_id) REFERENCES organization(org_id),
+                CONSTRAINT joins_pks PRIMARY KEY(student_num, org_id, membership_status, academic_year, classification, type, role, semester)
             )""")
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS `organization_event` (
@@ -83,7 +85,8 @@ class StudentOrgDBMS:
                 `payment_status` varchar(10) CHECK (payment_status IN ('PAID', 'NOT PAID')),
                 `payment_date` DATE,
                 CONSTRAINT pays_student_num_fk FOREIGN KEY(student_num) REFERENCES member(student_num),
-                CONSTRAINT pays_trans_num_fk FOREIGN KEY(trans_num) REFERENCES fee(trans_num)
+                CONSTRAINT pays_trans_num_fk FOREIGN KEY(trans_num) REFERENCES fee(trans_num),
+                CONSTRAINT pays_pks PRIMARY KEY(student_num, trans_num, payment_status, payment_date)
             )""")
         
     def checkUsernamePassword(self, username, type):
@@ -126,7 +129,13 @@ class StudentOrgDBMS:
         return self.cursor.fetchone()
 
     def get_all_payments(self, student_num):
-        self.cursor.execute("SELECT p.trans_num, p.payment_status, p.payment_date FROM pays p JOIN member m ON p.student_num = m.student_num WHERE m.student_num = %s", (student_num,))
+        self.cursor.execute("""
+            SELECT p.trans_num, p.payment_status, p.payment_date, f.amount, f.due_date, o.org_name 
+            FROM pays p
+            JOIN fee f ON p.trans_num = f.trans_num 
+            JOIN organization o ON f.org_id = o.org_id 
+            WHERE p.student_num = %s
+        """, (student_num,))
         result = self.cursor.fetchall()
         return result if result else None
     
@@ -144,7 +153,7 @@ class StudentOrgDBMS:
         return result if result else None
 
     def get_org_fees(self, org_id):
-        self.cursor.execute("SELECT trans_num, amount, due_date FROM fee WHERE org_id = %s", (org_id,))
+        self.cursor.execute("SELECT f.trans_num, f.amount, f.due_date, m.first_name, m.last_name FROM fee f JOIN pays p ON f.trans_num = p.trans_num JOIN member m ON p.student_num = m.student_num WHERE f.org_id = %s", (org_id,))
         result = self.cursor.fetchall()
         return result if result else None
     ###############################
@@ -166,7 +175,7 @@ class StudentOrgDBMS:
         return self.cursor.fetchone() is not None
     
     def org_exists(self, org_id):
-        self.cursor.execute("SELECT 1 FROM organization WHERE org_id = %s", (org_id))
+        self.cursor.execute("SELECT 1 FROM organization WHERE org_id = %s", (org_id,))
         return self.cursor.fetchone() is not None
 
     def add_membership(self, student_num, org_id, membership_status, acad_year, classification, joins_type, role, semester):
@@ -194,6 +203,10 @@ class StudentOrgDBMS:
         self.cursor.execute("DELETE FROM joins WHERE student_num = %s AND org_id = %s", (student_num, org_id,))
         self.connection.commit()
 
+    def updatePays(self, status, date, trans_num):
+        self.cursor.execute("UPDATE pays SET payment_status = %s, payment_date = %s WHERE trans_num = %s", (status, date, trans_num))
+        self.connection.commit()
+
 ####################################3
     def get_memorg(self, student_num):
         self.cursor.execute("""
@@ -203,8 +216,8 @@ class StudentOrgDBMS:
         """, (student_num,))
         return self.cursor.fetchall()
 
-    def get_member(self, student_num):
-        self.cursor.execute("SELECT * FROM member WHERE student_num = %s", (student_num,))
+    def get_member(self, last_name, org_id):
+        self.cursor.execute("SELECT m.student_num, m.first_name, m.last_name, m.mem_username, m.gender, m.degree_prog FROM member m JOIN joins j ON m.student_num = j.student_num WHERE m.last_name = %s and j.org_id = %s", (last_name, org_id,))
         return self.cursor.fetchall()
 
     def update_member(self, mem_username, mem_password, student_num):
@@ -246,4 +259,98 @@ class StudentOrgDBMS:
     
     def showGender(self, org_id):
         self.cursor.execute("SELECT m.first_name, m.last_name, m.gender FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY m.gender", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showExecs(self, org_id, academic_year):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.role FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s AND j.academic_year = %s", (org_id, academic_year,))
+        return self.cursor.fetchall()
+    
+    def showAnyRoleInReverse(self, org_id, role):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.role, j.academic_year FROM joins j JOIN member m ON j.student_num = m.student_num WHERE j.org_id = %s and j.role = %s ORDER BY j.academic_year DESC", (org_id, role,))
+        return self.cursor.fetchall()
+    
+    def showLatePayments(self, org_id, academic_year, semester):
+        self.cursor.execute("SELECT m.first_name, m.last_name, p.trans_num, p.payment_date, f.due_date FROM pays p JOIN fee f ON p.trans_num = f.trans_num  JOIN member m ON p.student_num = m.student_num JOIN joins j ON p.student_num = j.student_num AND f.org_id = j.org_id WHERE f.org_id = %s AND p.payment_status = 'PAID' AND p.payment_date > f.due_date", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showPercentageofMems(self, org_id, n):
+        self.cursor.execute("""
+            SELECT 
+                j.membership_status,
+                COUNT(*) AS count_members,
+                ROUND(COUNT(*) * 100.0 / total.total_count, 2) AS percentage
+            FROM joins j
+            JOIN (
+                SELECT COUNT(*) AS total_count
+                FROM joins
+                WHERE org_id = %s
+            ) AS total
+            WHERE j.org_id = %s
+            GROUP BY j.membership_status;
+        """, (org_id, org_id,))
+        return self.cursor.fetchall()
+    
+    def showAllAlumDate(self, org_id, year):
+        self.cursor.execute("""
+            SELECT DISTINCT m.first_name, m.last_name, m.acad_year_enrolled
+            FROM member m
+            JOIN joins j ON m.student_num = j.student_num
+            WHERE j.org_id = %s
+            AND j.classification = 'Alumn'
+            AND j.academic_year < %s
+        """, (org_id, year,))
+        return self.cursor.fetchall()
+
+    def showDebtMem(self, org_id, year, semester):
+        self.cursor.execute("""
+            SELECT m.first_name, m.last_name, SUM(f.amount) AS total_debt
+            FROM pays p
+            JOIN fee f ON p.trans_num = f.trans_num
+            JOIN member m ON p.student_num = m.student_num
+            JOIN joins j ON p.student_num = j.student_num AND f.org_id = j.org_id
+            WHERE f.org_id = %s and p.payment_status = 'NOT PAID'
+            GROUP BY p.student_num
+            HAVING total_debt = (SELECT MAX(total_debt)FROM (SELECT p.student_num, SUM(f.amount) AS total_debt
+                    FROM pays p
+                    JOIN fee f ON p.trans_num = f.trans_num
+                    JOIN joins j ON p.student_num = j.student_num AND f.org_id = j.org_id
+                    WHERE f.org_id = %s
+                    AND p.payment_status = 'NOT PAID'
+                    GROUP BY p.student_num
+                ) AS debts
+            )
+        """, (org_id,org_id,))
+        return self.cursor.fetchall()
+
+    def totalTransactions(self, org_id, date):
+        self.cursor.execute("""
+        SELECT p.payment_status, SUM(f.amount) AS total_amount
+        FROM pays p
+        JOIN fee f ON p.trans_num = f.trans_num
+        WHERE f.org_id = %s AND (p.payment_date <= %s OR p.payment_status = 'NOT PAID')
+        GROUP BY p.payment_status;
+        """, (org_id, date,))
+        return self.cursor.fetchall()
+
+    def showUnpaidMem(self, org_id, semester, acad_year):
+        self.cursor.execute("""
+            SELECT 
+                m.first_name,
+                m.last_name,
+                f.trans_num,
+                f.amount,
+                f.due_date
+            FROM pays p
+            JOIN fee f ON p.trans_num = f.trans_num
+            JOIN member m ON p.student_num = m.student_num
+            JOIN joins j ON p.student_num = j.student_num AND f.org_id = j.org_id
+            WHERE f.org_id = %s
+            AND j.academic_year = %s
+            AND j.semester = %s
+            AND p.payment_status = 'NOT PAID';
+        """, (org_id, acad_year, semester))
+        return self.cursor.fetchall()
+
+    def enterQuery(self, query):
+        self.cursor.execute(query)
         return self.cursor.fetchall()
