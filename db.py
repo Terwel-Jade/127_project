@@ -110,9 +110,12 @@ class StudentOrgDBMS:
         return None, None
     
     def check_if_have_org(self, student_num):
-        self.cursor.execute("SELECT o.org_name FROM organization o JOIN joins j ON o.org_id = j.org_id WHERE j.student_num = %s", (student_num,))
-        result = self.cursor.fetchall()
-        return result if result else None
+        self.cursor.execute("SELECT o.org_name, j.membership_status FROM organization o JOIN joins j ON o.org_id = j.org_id WHERE j.student_num = %s", (student_num,))
+        return self.cursor.fetchall()
+        # if result:
+        #     org_name, membership_status = result
+        #     return org_name, membership_status
+        # return None, None
     
     def get_org_id(self, org_name):
         self.cursor.execute("SELECT org_id FROM organization WHERE org_name = %s", (org_name,))
@@ -140,11 +143,15 @@ class StudentOrgDBMS:
         result = self.cursor.fetchall()
         return result if result else None
 
+    def get_org_fees(self, org_id):
+        self.cursor.execute("SELECT trans_num, amount, due_date FROM fee WHERE org_id = %s", (org_id,))
+        result = self.cursor.fetchall()
+        return result if result else None
     ###############################
 
-    def get_students(self):
-        self.cursor.execute("SELECT * FROM member")
-        return self.cursor.fetchall()
+    def get_student(self, student_num):
+        self.cursor.execute("SELECT last_name FROM member WHERE student_num = %s", (student_num,))
+        return self.cursor.fetchone()
 
     def add_organization(self, org_id, org_username, org_password, org_name, year_founded, org_type):
         self.cursor.execute("INSERT INTO organization (org_id, org_username, org_password, org_name, year_founded, org_type) VALUES (%s, %s, %s, %s, %s, %s)", (org_id, org_username, org_password, org_name, year_founded, org_type,))
@@ -154,8 +161,8 @@ class StudentOrgDBMS:
         self.cursor.execute("SELECT * FROM organization")
         return self.cursor.fetchall()
     
-    def member_exists(self, student_num):
-        self.cursor.execute("SELECT 1 FROM member WHERE student_num = %s", (student_num))
+    def member_exists(self, student_num, org_id):
+        self.cursor.execute("SELECT 1 FROM joins WHERE student_num = %s AND org_id = %s", (student_num, org_id,))
         return self.cursor.fetchone() is not None
     
     def org_exists(self, org_id):
@@ -174,10 +181,69 @@ class StudentOrgDBMS:
         self.cursor.execute("INSERT INTO organization_event VALUES (%s, %s)", (org_id, event_name))
         self.connection.commit()
 
-    def add_fee(self, trans_num, amount, due_date, org_id):
-        self.cursor.execute("INSERT INTO fee VALUES (%s, %s, %s, %s)", (trans_num, amount, due_date, org_id))
+    def add_fee(self, amount, due_date, org_id):
+        self.cursor.execute("INSERT INTO fee (amount, due_date, org_id) VALUES (%s, %s, %s)", (amount, due_date, org_id))
         self.connection.commit()
+        return self.cursor.lastrowid
 
     def add_pays(self, student_num, trans_num, payment_status, payment_date):
         self.cursor.execute("INSERT INTO pays VALUES (%s, %s, %s, %s)", (student_num, trans_num, payment_status, payment_date))
         self.connection.commit()
+
+    def delete_membership(self, student_num, org_id):
+        self.cursor.execute("DELETE FROM joins WHERE student_num = %s AND org_id = %s", (student_num, org_id,))
+        self.connection.commit()
+
+####################################3
+    def get_memorg(self, student_num):
+        self.cursor.execute("""
+            SELECT org_name FROM organization o 
+            JOIN joins j ON o.org_id=j.org_id 
+            WHERE student_num = %s
+        """, (student_num,))
+        return self.cursor.fetchall()
+
+    def get_member(self, student_num):
+        self.cursor.execute("SELECT * FROM member WHERE student_num = %s", (student_num,))
+        return self.cursor.fetchall()
+
+    def update_member(self, mem_username, mem_password, student_num):
+        self.cursor.execute("UPDATE member SET mem_username = %s, mem_password = %s WHERE student_num = %s", (mem_username, mem_password, student_num))
+        self.connection.commit()
+
+    def get_pending(self, student_num):
+        self.cursor.execute("""
+        SELECT o.org_name, f.trans_num, f.amount, p.payment_status FROM fee f  JOIN pays p ON f.trans_num = p.trans_num  JOIN organization o ON f.org_id = o.org_id WHERE payment_status = 'NOT PAID' AND p.student_num = %s GROUP BY org_name, f.trans_num, f.amount, p.payment_status
+        """, (student_num,))
+
+    def editMembership(self, org_id, student_num, membership_status, classification, type, role):
+        self.cursor.execute("UPDATE joins SET membership_status = %s, classification = %s, type = %s, role = %s WHERE student_num = %s AND org_id = %s", (membership_status, classification, type, role, student_num, org_id,))
+        self.connection.commit()
+
+    def checkOldPassword(self, student_num):
+        self.cursor.execute("SELECT mem_password FROM member WHERE student_num = %s", (student_num,))
+        return self.cursor.fetchone()
+    
+    def showRoles(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.role FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY j.role", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showStatus(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.membership_status FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY j.membership_status", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showDegProg(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, m.degree_prog FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY m.degree_prog", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showBatch(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.academic_year FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY j.academic_year", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showCommittee(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, j.type FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY j.type", (org_id,))
+        return self.cursor.fetchall()
+    
+    def showGender(self, org_id):
+        self.cursor.execute("SELECT m.first_name, m.last_name, m.gender FROM member m JOIN joins j ON m.student_num = j.student_num WHERE j.org_id = %s ORDER BY m.gender", (org_id,))
+        return self.cursor.fetchall()

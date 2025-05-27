@@ -2,6 +2,7 @@ import customtkinter as ctk
 import mysql.connector
 from tkinter import messagebox
 from db import StudentOrgDBMS
+from tkcalendar import DateEntry
 
 class App(ctk.CTk):
     def __init__(self):
@@ -159,7 +160,7 @@ class MemberScreen(ctk.CTkFrame):
         profile_tab = tab_view.tab("Profile")
 
         self.build_home(home_tab)
-        self.build_profile_tab(profile_tab, first_name, last_name)
+        self.build_profile_tab(profile_tab, first_name, last_name, student_num[0])
         self.build_org_tab(org_tab, student_num[0])
         self.build_pay_tab(pay_tab, student_num[0])
 
@@ -170,18 +171,22 @@ class MemberScreen(ctk.CTkFrame):
         orgs = self.db.check_if_have_org(student_num)
 
         if orgs:
-            scroll_frame = ctk.CTkScrollableFrame(parent, width=300, height=200)
+            scroll_frame = ctk.CTkScrollableFrame(parent, width=600, height=300)
             scroll_frame.pack(pady=10)
 
-            for org in orgs:
-                ctk.CTkLabel(scroll_frame, text=org[0]).pack(anchor="w", padx=10, pady=5)
+            for org_name, status in orgs:
+                ctk.CTkLabel(
+                    scroll_frame,
+                    text=f"{org_name}   |   Status: {status}"
+                ).pack(anchor="w", padx=10, pady=5)
         else:
             ctk.CTkLabel(parent, text="You have not yet joined any org", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
 
-        ctk.CTkButton(parent, text="Join Org", command=lambda: self.master.show_frame(JoinOrg, student_num)).pack(pady=10)
+        #ctk.CTkButton(parent, text="Join Org", command=lambda: self.master.show_frame(JoinOrg, student_num)).pack(pady=10)
 
-    def build_profile_tab(self, parent, first_name, last_name):
+    def build_profile_tab(self, parent, first_name, last_name, student_num):
         ctk.CTkLabel(parent, text=f"{first_name} {last_name}", font=ctk.CTkFont(size=14, weight="normal")).pack(pady=10)
+        ctk.CTkButton(parent, text="Edit Credentials", command=lambda: self.master.show_frame(EditStudent, self.username, student_num)).pack(pady=10)
 
     def build_pay_tab(self, parent, student_num):
         pays = self.db.get_all_payments(student_num)
@@ -194,6 +199,44 @@ class MemberScreen(ctk.CTkFrame):
                 ctk.CTkLabel(scroll_frame, text=pay).pack(anchor="w", padx=10, pady=5)
         else:
             ctk.CTkLabel(parent, text="You have no transactions", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+
+class EditStudent(ctk.CTkFrame):
+    def __init__(self, master, username, student_num):
+        super().__init__(master)
+        self.username = username
+        self.student_num = student_num
+        
+        self.db = StudentOrgDBMS()
+
+        ctk.CTkButton(self, text="Back", command=lambda: master.show_frame(MemberScreen, self.username)).pack(pady=10) # Go back
+        ctk.CTkLabel(self, text="Edit My Credentials", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        self.editFormStudent()
+        ctk.CTkButton(self, text="Submit", command=lambda: self.handleEditButton).pack(pady=10)
+
+    def editFormStudent(self):
+        self.edit_username = ctk.CTkEntry(self, placeholder_text="New username")
+        self.edit_username.pack(pady=10)
+
+        self.edit_oldpassword = ctk.CTkEntry(self, placeholder_text="Old password")
+        self.edit_oldpassword.pack(pady=10)
+
+        self.edit_newpassword = ctk.CTkEntry(self, placeholder_text="New password")
+        self.edit_newpassword.pack(pady=10)
+
+    def handleEditButton(self):
+        old_password_entry = self.edit_oldpassword.get().strip()
+        username = self.edit_username.get().strip()
+        password = self.edit_newpassword.get().strip()
+
+        old_setPasswrod = self.db.checkOldPassword(self.student_num)
+        if old_setPasswrod and old_setPasswrod[0] == old_password_entry:
+            self.db.update_member(username, password, self.student_num)
+
+            messagebox.showinfo("Successful", "Successfully changed informations")
+            self.master.show_frame(MemberScreen, self.username)
+        else:
+            messagebox.showerror("Failed", "Incorrect old password")
+            return
 
 class JoinOrg(ctk.CTkFrame):
     def __init__(self, master, student_num):
@@ -342,7 +385,7 @@ class AdminScreen(ctk.CTkFrame):
         org_id = self.db.get_org_id_username(self.username)
         org_name = self.db.get_org_name(org_id[0])
 
-        ctk.CTkLabel(self, text=f"Hello, {org_name}!", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(self, text=f"Hello, {org_name[0]}!", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
         ctk.CTkButton(self, text="Sign out", command=lambda: master.show_frame(SelectScreen)).pack(pady=10)
 
         tab_view = ctk.CTkTabview(self, width=900, height=600)
@@ -352,35 +395,182 @@ class AdminScreen(ctk.CTkFrame):
         tab_view.add("Members")
         tab_view.add("Payments")
         tab_view.add("Events")
+        tab_view.add("Reports")
         tab_view.add("Profile")
 
         home_tab = tab_view.tab("Home")
         org_tab = tab_view.tab("Members")
         pay_tab = tab_view.tab("Payments")
         events_tab = tab_view.tab("Events")
+        report_tab = tab_view.tab("Reports")
         profile_tab = tab_view.tab("Profile")
 
         self.build_home(home_tab)
         self.build_mem_tab(org_tab, org_id[0])
         self.build_profile_tab(profile_tab, org_id[0], org_name[0])
         self.build_event_tab(events_tab, org_id[0])
+        self.build_payment_tab(pay_tab, org_id[0], username)
+        self.build_report_tab(report_tab, org_id[0])
 
     def build_home(self, parent):
         ctk.CTkLabel(parent, text="Welcome to the database!", font=ctk.CTkFont(size=14, weight="normal")).pack(pady=10)
+
+    def build_report_tab(self, parent, org_id):
+        ctk.CTkLabel(parent, text="Organization Reports", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+
+        scroll_frame = ctk.CTkScrollableFrame(parent, width=800, height=400)
+        scroll_frame.pack(pady=10)
+
+        self.report_choice = ctk.CTkOptionMenu(scroll_frame, values=["Member Roles", "Member Status", "Member Gender", "Member Degree Program", "Batch (Year)", "Committee"])
+        self.report_choice.pack(pady=10)
+
+        #ctk.CTkLabel(scroll_frame, text="Members Role", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=10)
+        ctk.CTkButton(scroll_frame, text="Generate", command=lambda: self.displayReport(org_id)).pack(pady=10)
+
+        self.roles_display_frame = ctk.CTkFrame(scroll_frame)
+        self.roles_display_frame.pack(pady=10, fill="both", expand=True)
+
+
+    def displayReport(self, org_id):
+        # Clears the generated scrollable
+        for widget in self.roles_display_frame.winfo_children():
+            #if isinstance(widget, ctk.CTkScrollableFrame):
+            widget.destroy()
+
+        report_type = self.report_choice.get()
+
+        if report_type == "Member Roles":
+            self.show_roles(org_id)
+        elif report_type == "Member Status":
+            self.show_status(org_id)
+        elif report_type == "Member Gender":
+            self.show_gender(org_id)
+        elif report_type == "Member Degree Program":
+            self.show_degree_program(org_id)
+        elif report_type == "Batch (Year)":
+            self.show_batches(org_id)
+        elif report_type == "Committee":
+            self.show_committees(org_id)
+
+        
+    def show_roles(self, org_id):
+        roles = self.db.showRoles(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member with role yet", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+    def show_status(self, org_id):
+        roles = self.db.showStatus(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+    def show_gender(self, org_id):
+        roles = self.db.showGender(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+    def show_degree_program(self, org_id):
+        roles = self.db.showDegProg(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+    def show_batches(self, org_id):
+        roles = self.db.showBatch(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+    def show_committees(self, org_id):
+        roles = self.db.showCommittee(org_id)
+        if roles:
+            for fname, lname, role in roles:
+                member = ctk.CTkLabel(self.roles_display_frame, text=f"{fname} {lname}  -  {role}")
+                member.pack(pady=10)
+        else:
+            ctk.CTkLabel(self.roles_display_frame, text="No member", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
 
     def build_mem_tab(self, parent, org_id):
         mems = self.db.get_memberships(org_id)
 
         if mems:
-            scroll_frame = ctk.CTkScrollableFrame(parent, width=300, height=200)
+            # scroll_frame = ctk.CTkScrollableFrame(parent, width=300, height=200)
+            # scroll_frame.pack(pady=10)
+
+            # for mem in mems:
+            #     ctk.CTkLabel(scroll_frame, text=f"{mem[0]}  |   {mem[1]} {mem[2]}   | {mem[3]}").pack(anchor="w", padx=10, pady=5)
+            scroll_frame = ctk.CTkScrollableFrame(parent, width=600, height=300)
             scroll_frame.pack(pady=10)
 
             for mem in mems:
-                ctk.CTkLabel(scroll_frame, text=f"{mem[0]}  |   {mem[1]} {mem[2]}   | {mem[3]}").pack(anchor="w", padx=10, pady=5)
+                member_id = mem[0]
+                full_name = f"{mem[1]} {mem[2]}"
+                deg_prog = mem[3]
+
+                # Container frame for label + delete button
+                member_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+                member_frame.pack(fill="x", padx=10, pady=5)
+
+                # Member label
+                member_label = ctk.CTkLabel(member_frame, text=f"{member_id}  |  {full_name}  |  {deg_prog}")
+                member_label.pack(side="left", padx=(0, 10))
+
+                # Edit button
+                edit_btn = ctk.CTkButton(
+                    member_frame,
+                    text="Edit",
+                    width=30,
+                    height=25,
+                    fg_color="blue",
+                    hover_color="darkblue",
+                    text_color="white",
+                    font=ctk.CTkFont(size=14),
+                    command=lambda m_id=member_id: self.master.show_frame(EditMember, org_id, self.username, m_id)
+                )
+                edit_btn.pack(side="right")
+
+                # Delete button
+                delete_btn = ctk.CTkButton(
+                    member_frame,
+                    text="x",
+                    width=30,
+                    height=25,
+                    fg_color="red",
+                    hover_color="darkred",
+                    text_color="white",
+                    font=ctk.CTkFont(size=14),
+                    command=lambda m_id=member_id, frame=member_frame: self.delete_member(m_id, org_id, frame)
+                )
+                delete_btn.pack(side="right")
         else:
             ctk.CTkLabel(parent, text="Your organization have no member yet", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
 
-        ctk.CTkButton(parent, text="Add Member", command=lambda: self.master.show_frame()).pack(pady=10)
+        ctk.CTkButton(parent, text="Add Member", command=lambda: self.master.show_frame(AddMember, org_id, self.username)).pack(pady=10)
+
+    def delete_member(self, member_id, org_id, frame):
+        if not messagebox.askyesno("Confirm Delete", f"Delete member {member_id}?"):
+            return
+
+        self.db.delete_membership(member_id, org_id)  # This should be a method in your StudentOrgDBMS class
+        frame.destroy()
 
     def build_profile_tab(self, parent, org_id, org_name):
         ctk.CTkLabel(parent, text=f"{org_id} | {org_name}", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
@@ -397,7 +587,206 @@ class AdminScreen(ctk.CTkFrame):
         else:
             ctk.CTkLabel(parent, text="Your organization have no event yet", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
 
-        ctk.CTkButton(parent, text="Add Events", command=lambda: self.master.show_frame()).pack(pady=10)
+        ctk.CTkButton(parent, text="Add Events", command=lambda: self.master.show_frame(AddEvent, org_id, self.username)).pack(pady=10)
+
+    def build_payment_tab(self, parent, org_id, username):
+        fees = self.db.get_org_fees(org_id)
+
+        if fees:
+            scroll_frame = ctk.CTkScrollableFrame(parent, width=300, height=200)
+            scroll_frame.pack(pady=10)
+
+            for fee in fees:
+                ctk.CTkLabel(scroll_frame, text=f"{fee[0]}  |  Amount: {fee[1]}     Due: {fee[2]}").pack(anchor="w", padx=10, pady=5)
+        else:
+            ctk.CTkLabel(parent, text="Your organization have no transaction yet", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+
+        ctk.CTkButton(parent, text="Add Transaction", command=lambda: self.master.show_frame(AddPayment, org_id, username)).pack(pady=10)
+
+class AddMember(ctk.CTkFrame):
+    def __init__(self, master, org_id, username):
+        super().__init__(master)
+        self.org_id = org_id
+        self.username = username
+
+        self.db = StudentOrgDBMS()
+
+        ctk.CTkButton(self, text="Go Back", command=lambda: master.show_frame(AdminScreen, username)).pack(pady=10)
+
+        self.addMemberForm()
+
+        ctk.CTkButton(self, text="Add", command=lambda: self.handleAddMem(self.org_id)).pack(pady=10)
+
+    def addMemberForm(self):
+        ctk.CTkLabel(self, text="Add New Member", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+
+        self.add_stud_name = ctk.CTkEntry(self, placeholder_text="Name")
+        self.add_stud_name.pack(pady=10)
+
+        self.add_stud_num = ctk.CTkEntry(self, placeholder_text="Student Number")
+        self.add_stud_num.pack(pady=10)
+
+        self.add_member_status = ctk.CTkOptionMenu(self, values=["ACTIVE", "INACTIVE"])
+        self.add_member_status.pack(pady=10)
+
+        self.add_acad_year = ctk.CTkEntry(self, placeholder_text="Academic Year")
+        self.add_acad_year.pack(pady=10)
+
+        self.add_classification = ctk.CTkOptionMenu(self, values=["Resident", "Alumn"])
+        self.add_classification.pack(pady=10)
+
+        self.add_comm_type = ctk.CTkEntry(self, placeholder_text="Committee")
+        self.add_comm_type.pack(pady=10)
+
+        self.add_role = ctk.CTkOptionMenu(self, values=["Member","President", "Vice President", "Secretary", "Treasurer"])
+        self.add_role.pack(pady=10)
+
+        self.add_sem = ctk.CTkOptionMenu(self, values=["1", "2", "M"])
+        self.add_sem.pack(pady=10)
+
+    def handleAddMem(self, org_id):
+        student_num = self.add_stud_num.get().strip()
+        membership_status = self.add_member_status.get()
+        acad_year = self.add_acad_year.get().strip()
+        classification = self.add_classification.get()
+        joins_type = self.add_comm_type.get().strip()
+        role = self.add_role.get()
+        semester = self.add_sem.get()
+
+        if not joins_type:
+            joins_type = None
+
+        # Check if student exist in databases
+        if self.db.get_student(student_num):
+            self.db.add_membership(student_num, org_id, membership_status, acad_year, classification, joins_type, role, semester)
+            self.master.show_frame(AdminScreen, self.username)
+        else:
+            messagebox.showerror("Failed", "No Student Found")
+            return
+
+class EditMember(ctk.CTkFrame):
+    def __init__(self, master, org_id, username, student_num):
+        super().__init__(master)
+        self.org_id = org_id
+        self.username = username
+        self.student_num = student_num
+
+        self.db = StudentOrgDBMS()
+
+        ctk.CTkButton(self, text="Go Back", command=lambda: master.show_frame(AdminScreen, username)).pack(pady=10)
+
+        ctk.CTkLabel(self, text="Edit Member Details", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+
+        self.editForm()
+
+        ctk.CTkLabel(self, text="Re-enter details if no changes made", font=ctk.CTkFont(size=10, weight="normal")).pack(pady=10)
+
+        ctk.CTkButton(self, text="Submit", command=lambda: self.handEdit(org_id, student_num)).pack(pady=10)
+
+    def editForm(self):
+        self.add_member_status = ctk.CTkOptionMenu(self, values=["ACTIVE", "INACTIVE", "EXPELLED", "SUSPENDED"])
+        self.add_member_status.pack(pady=10)
+
+        self.add_classification = ctk.CTkOptionMenu(self, values=["Resident", "Alumn"])
+        self.add_classification.pack(pady=10)
+
+        self.add_comm_type = ctk.CTkEntry(self, placeholder_text="Committee")
+        self.add_comm_type.pack(pady=10)
+
+        self.add_role = ctk.CTkOptionMenu(self, values=["Member","President", "Vice President", "Secretary", "Treasurer"])
+        self.add_role.pack(pady=10)
+
+    def handEdit(self, org_id, student_num):
+        status = self.add_member_status.get()
+        classification = self.add_classification.get()
+        comm_type = self.add_comm_type.get().strip()
+        role = self.add_role.get()
+
+        if not joins_type:
+            joins_type = None
+
+        self.db.editMembership(org_id, student_num, status, classification, comm_type, role)
+        self.master.show_frame(AdminScreen, self.username)
+
+
+class AddEvent(ctk.CTkFrame):
+    def __init__(self, master, org_id, username):
+        super().__init__(master)
+        self.org_id = org_id
+        self.username = username
+
+        self.db = StudentOrgDBMS()
+
+        ctk.CTkButton(self, text="Go Back", command=lambda: master.show_frame(AdminScreen, username)).pack(pady=10)
+
+        self.event_name_entry = ctk.CTkEntry(self, placeholder_text="Event Name")
+        self.event_name_entry.pack(pady=10)
+
+        ctk.CTkButton(self, text="Submit", command=lambda:
+                      (self.db.add_event(org_id, self.event_name_entry.get().strip()), self.master.show_frame(AdminScreen, username))
+                      ).pack(pady=10)
+
+class AddPayment(ctk.CTkFrame):
+    def __init__(self, master, org_id, username):
+        super().__init__(master)
+        self.org_id = org_id
+        self.username = username
+
+        self.db = StudentOrgDBMS()
+
+        ctk.CTkButton(self, text="Go Back", command=lambda: master.show_frame(AdminScreen, username)).pack(pady=10)
+
+        ctk.CTkLabel(self, text="Create Transaction", font=ctk.CTkFont(size=20)).pack(pady=10)
+        self.createFee()
+
+        ctk.CTkButton(self, text="Submit", command=self.handle_createFee).pack(pady=10)
+
+    def createFee(self):
+        self.fee_amount_entry = ctk.CTkEntry(self, placeholder_text="Amount in Peso")
+        self.fee_amount_entry.pack(pady=10)
+
+        ctk.CTkLabel(self, text="Due Date", font=ctk.CTkFont(size=14)).pack(pady=10)
+        self.fee_due_entry = DateEntry(self, width=12, background='darkblue',
+                               foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+        self.fee_due_entry.pack(pady=10)
+
+        self.payment_status_entry = ctk.CTkOptionMenu(self, values=["PAID", "NOT PAID"])
+        self.payment_status_entry.pack(pady=10)
+
+        ctk.CTkLabel(self, text="Payment Date (Leave blank if not paid)", font=ctk.CTkFont(size=14)).pack(pady=10)
+        self.pay_date = DateEntry(self, width=12, background='darkblue',
+                               foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
+        self.pay_date.pack(pady=10)
+        self.pay_date.delete(0, 'end')
+
+        self.member_stud_num_entry = ctk.CTkEntry(self, placeholder_text="Student Number")
+        self.member_stud_num_entry.pack(pady=10)
+
+    def handle_createFee(self):
+            # Check if member exist in the org
+        student_num = self.member_stud_num_entry.get().strip()
+            
+        if self.db.member_exists(student_num, self.org_id):
+            self.addFeePayment()
+            self.master.show_frame(AdminScreen, self.username)
+        else:
+            messagebox.showerror("Failed", "No member found!")
+            return
+            
+    def addFeePayment(self):
+        stud_num = self.member_stud_num_entry.get().strip()
+        amount = self.fee_amount_entry.get().strip()
+        due_date = self.fee_due_entry.get()
+        payment_status = self.payment_status_entry.get()
+        pay_date = self.pay_date.get()
+
+        if not pay_date.strip():
+            pay_date = None
+
+        self.trans_num = self.db.add_fee(amount, due_date, self.org_id)
+
+        self.db.add_pays(stud_num, self.trans_num, payment_status, pay_date) 
+
 
 if __name__ == "__main__":
     app = App() 
